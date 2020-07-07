@@ -1,0 +1,75 @@
+#!/bin/sh
+
+echo -e "\e[33m ========= | AWS EC2 Automation | Data4Change Workshop | =========\033[0m"
+echo ""
+echo ""
+
+
+#Variables used in script:
+availabilityZone="us-east-1a"
+name="Charu practice"
+vpcName="$name VPC"
+subnetName="$name Subnet"
+gatewayName="$name Gateway"
+routeTableName="$name Route Table"
+securityGroupName="$name Security Group"
+vpcCidrBlock="10.0.0.0/16"
+subNetCidrBlock="10.0.1.0/24"
+portCidrBlock="122.163.170.174/32"
+destinationCidrBlock="0.0.0.0/0"
+instanceName="$name Instance"
+aws_image_id="ami-c998b6b2"
+count_no="1"
+i_type="t2.micro"
+aws_key_name="CharuKeyPair"
+ssh_key="CharuKeyPair.pem"
+
+
+#aws configure
+
+echo "Making VPC"
+aws_response=$(aws ec2 create-vpc --cidr-block "$vpcCidrBlock" --region us-east-1  --output json)
+vpcId=$(echo -e "$aws_response" |  /usr/bin/jq '.Vpc.VpcId' | tr -d '"')
+aws ec2 create-tags --resources "$vpcId"  --tags Key=Name,Value="$vpcName"
+
+echo "Adding DNS Support"
+modify_response=$(aws ec2 modify-vpc-attribute --vpc-id "$vpcId" --enable-dns-support "{\"Value\":true}")
+
+echo "Creating Subnet for VPC $vpcId"
+subnet_response=$(aws ec2 create-subnet --cidr-block "$subNetCidrBlock" --availability-zone "$availabilityZone" --vpc-id "$vpcId"  --output json)
+subnetId=$(echo -e "$subnet_response" |  /usr/bin/jq '.Subnet.SubnetId' | tr -d '"')
+aws ec2 create-tags --resources "$subnetId" --tags Key=Name,Value="$subnetName"
+modify_response=$(aws ec2 modify-subnet-attribute --subnet-id "$subnetId"  --map-public-ip-on-launch)
+
+echo "Creating Internet Gateway"
+gateway_response=$(aws ec2 create-internet-gateway --output json)
+gatewayId=$(echo -e "$gateway_response" |  /usr/bin/jq '.InternetGateway.InternetGatewayId' | tr -d '"') 
+aws ec2 create-tags --resources "$gatewayId" --tags Key=Name,Value="$gatewayName"
+attach_response=$(aws ec2 attach-internet-gateway --internet-gateway-id "$gatewayId" --vpc-id "$vpcId")
+echo "Internet Gateway with ID $gatewayId made"
+
+echo "Creating Security Group"
+security_response=$(aws ec2 create-security-group --group-name "$securityGroupName" --description "$securityGroupName"  --vpc-id "$vpcId" --output json)
+groupId=$(echo -e "$security_response" |  /usr/bin/jq '.GroupId' | tr -d '"')
+aws ec2 create-tags --resources "$groupId" --tags Key=Name,Value="$securityGroupName"
+security_response2=$(aws ec2 authorize-security-group-ingress --group-id "$groupId"  --protocol tcp --port 22  --cidr "$portCidrBlock")
+echo "Security Group with ID $groupId made"
+
+echo "Creating Route Table"
+route_table_response=$(aws ec2 create-route-table --vpc-id "$vpcId" --output json)
+routeTableId=$(echo -e "$route_table_response" |  /usr/bin/jq '.RouteTable.RouteTableId' | tr -d '"')
+aws ec2 create-tags --resources "$routeTableId" --tags Key=Name,Value="$routeTableName"
+route_response=$(aws ec2 create-route  --route-table-id "$routeTableId" --destination-cidr-block "$destinationCidrBlock" --gateway-id "$gatewayId")
+associate_response=$(aws ec2 associate-route-table --subnet-id "$subnetId" --route-table-id "$routeTableId")
+echo "Route Table with ID $routeTableId made"
+
+
+echo "VPC created:"
+echo "Use Subnet ID $subnetId and Security Group ID $groupId to create AWS EC2 instances "
+echo ""
+echo ""
+echo -e "\e[32mCreating EC2 instance in AWS\033[0m"
+ec2_response=$(aws ec2 run-instances --image-id $aws_image_id --count $count_no --instance-type $i_type --key-name $aws_key_name --security-group-ids $groupId --subnet-id $subnetId)
+echo "EC2 Running...."
+
+
